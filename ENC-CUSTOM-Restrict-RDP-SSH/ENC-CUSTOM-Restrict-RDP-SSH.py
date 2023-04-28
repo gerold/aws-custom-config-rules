@@ -34,30 +34,24 @@ ASSUME_ROLE_MODE = False
 # Other parameters (no change needed)
 CONFIG_ROLE_TIMEOUT_SECONDS = 900
 
-#blacklist_ports = [22, 3389]
-AFFECTED_RULES = []
+blacklist_ports = [22, 3389]
+cidr_ranges = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
 
 #############
 # Main Code #
 #############
 
-def evaluate_compliance(event, configuration_item, valid_rule_parameters):
-    blacklist_ports = []
+def evaluate_compliance(configuration_item):
     inbound_rule = []
     black_rules = []
-    cidr_ranges = ["192.168.0.0/16", "10.0.0.0/8", "172.16.0.0/12"]
     relation = []
     sg_attachment = False
 
-    # check for any attachment to ENI or Instance resource
     for relation in configuration_item["relationships"]:
-        #if relation['resourceId'][0:3] == "eni" or relation['resourceId'][0:2] == "i-":
         if relation['resourceType'] == "AWS::EC2::Instance" or relation['resourceType'] == "AWS::EC2::NetworkInterface":
             sg_attachment = True
     
     if sg_attachment:
-        for port_num in valid_rule_parameters["BlacklistedPorts"].split(","):
-            blacklist_ports.append(int(port_num.strip()))
         for inbound_rule in configuration_item['configuration']['ipPermissions']:
             for cidr in inbound_rule["ipv4Ranges"]:
                 if is_cidr_outside_ranges(cidr["cidrIp"], cidr_ranges) and inbound_rule["ipProtocol"] == "tcp":
@@ -66,10 +60,10 @@ def evaluate_compliance(event, configuration_item, valid_rule_parameters):
                     if check_singleport(inbound_rule, blacklist_ports):
                         black_rules.append(inbound_rule)
         if black_rules:
-            return build_evaluation_from_config_item(configuration_item, 'NON_COMPLIANT', annotation=str(black_rules))
-        return build_evaluation_from_config_item(configuration_item, 'COMPLIANT', annotation='This SecurityGroup has no blacklisted ingress rules.')
+            return build_evaluation_from_config_item(configuration_item, 'NON_COMPLIANT', annotation='SSH or RDP is allowed only within Private Network.')
+        return build_evaluation_from_config_item(configuration_item, 'COMPLIANT', annotation='SecurityGroup has no restricted SSH or RDP rule.')
     else:
-        return build_evaluation_from_config_item(configuration_item, 'NOT_APPLICABLE', annotation='This SecurityGroup is not attached.')
+        return build_evaluation_from_config_item(configuration_item, 'NOT_APPLICABLE', annotation='SecurityGroup is not attached to ENI or EC2 Instance.')
 
 def is_cidr_outside_ranges(cidr, ranges):
     ip_network = ipaddress.ip_network(cidr)
@@ -94,17 +88,6 @@ def check_singleport(inbound_rule, blacklist_ports):
         if inbound_rule["fromPort"] == inbound_rule["toPort"] == port:
             hit = inbound_rule["fromPort"]
     return hit
-
-def evaluate_parameters(rule_parameters):
-    try:
-        if rule_parameters["BlacklistedPorts"] != "" and isinstance(rule_parameters["BlacklistedPorts"], str):
-            valid_rule_parameters = rule_parameters
-        else:
-            print("Please specify valid port numbers (without double quotes) and multipe ports should be separated by comma(,)")
-        return valid_rule_parameters
-    except LookupError:
-        print("Please input BlacklistedPorts as the key.")
-    return valid_rule_parameters
 
 ####################
 # Helper Functions #
@@ -341,16 +324,11 @@ def lambda_handler(event, context):
         rule_parameters = json.loads(event['ruleParameters'])
 
     try:
-        valid_rule_parameters = evaluate_parameters(rule_parameters)
-    except ValueError as ex:
-        return build_parameters_value_error_response(ex)
-
-    try:
         AWS_CONFIG_CLIENT = get_client('config', event)
         if invoking_event['messageType'] in ['ConfigurationItemChangeNotification', 'ScheduledNotification', 'OversizedConfigurationItemChangeNotification']:
             configuration_item = get_configuration_item(invoking_event)
             if is_applicable(configuration_item, event):
-                compliance_result = evaluate_compliance(event, configuration_item, valid_rule_parameters)
+                compliance_result = evaluate_compliance(configuration_item)
             else:
                 compliance_result = "NOT_APPLICABLE"
         else:

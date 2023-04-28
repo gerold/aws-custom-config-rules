@@ -4,7 +4,7 @@
     "RuleName": "ENC-CUSTOM-Restrict-RDP-SSH",
     "SourceRuntime": "python3.7",
     "CodeKey": "ENC-CUSTOM-Restrict-RDP-SSH.zip",
-    "InputParameters": "{\"BlacklistedPorts\":\"22, 3389\"}",
+    "InputParameters": "{}",
     "OptionalParameters": "{}",
     "SourceEvents": "AWS::EC2::SecurityGroup"
   },
